@@ -40,7 +40,7 @@ from sqlalchemy import select, update, delete
 # Application core
 from app.core.config import settings, config
 from app.core.logging import get_logger, get_utc_datetime
-from app.core.database import db_manager, with_db_session, execute_with_session
+# Note: Database imports removed to avoid circular import with vector_reliability
 from app.core.exceptions import (
     BaseAppException,
     DocumentProcessingError,
