@@ -1,0 +1,112 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: langchain-qa-app
+    ports:
+      - "8000:8000"
+    environment:
+      - DEBUG=true
+      - LOG_LEVEL=DEBUG
+      - DATABASE_URL=postgresql://langchain:langchain123@db:5432/langchain_qa
+      - REDIS_URL=redis://redis:6379/0
+    env_file:
+      - .env
+    volumes:
+      - ./app:/app/app:ro  # Mount app code as read-only for hot reload
+      - ./logs:/app/logs
+      - ./uploads:/app/uploads
+      - ./vector_store:/app/vector_store
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - langchain-network
+    command: ["uvicorn", "app.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  db:
+    image: postgres:15-alpine
+    container_name: langchain-qa-db
+    environment:
+      - POSTGRES_USER=langchain
+      - POSTGRES_PASSWORD=langchain123
+      - POSTGRES_DB=langchain_qa
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init_db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - langchain-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U langchain -d langchain_qa"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: langchain-qa-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - langchain-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Development tools
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: langchain-qa-pgadmin
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=admin@langchain.local
+      - PGADMIN_DEFAULT_PASSWORD=admin123
+      - PGADMIN_CONFIG_SERVER_MODE=False
+    ports:
+      - "5050:80"
+    depends_on:
+      - db
+    networks:
+      - langchain-network
+    profiles:
+      - dev-tools
+
+  # Redis Commander for Redis GUI
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: langchain-qa-redis-commander
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+    ports:
+      - "8081:8081"
+    depends_on:
+      - redis
+    networks:
+      - langchain-network
+    profiles:
+      - dev-tools
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  langchain-network:
+    driver: bridge

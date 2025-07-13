@@ -1,0 +1,44 @@
+# Development-specific overrides
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: builder  # Use builder stage for development
+    volumes:
+      - ./app:/app/app  # Mount as read-write for development
+      - ./tests:/app/tests
+      - ./scripts:/app/scripts
+    environment:
+      - RELOAD=true
+      - WORKERS=1
+    stdin_open: true
+    tty: true
+    command: ["uvicorn", "app.api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--log-level", "debug"]
+
+  # Jupyter notebook for interactive development
+  notebook:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: builder
+    container_name: langchain-qa-notebook
+    ports:
+      - "8888:8888"
+    environment:
+      - JUPYTER_ENABLE_LAB=yes
+    volumes:
+      - ./:/app
+      - jupyter_data:/home/appuser/.jupyter
+    networks:
+      - langchain-network
+    command: ["jupyter", "lab", "--ip=0.0.0.0", "--port=8888", "--no-browser", "--allow-root"]
+    profiles:
+      - dev-tools
+
+volumes:
+  jupyter_data:

@@ -13,6 +13,7 @@ import asyncio
 
 from app.core.config import settings
 from app.core.logging import get_logger, LoggingMiddleware, set_correlation_id, log_request_error
+from app.core.database import init_database, close_database
 from app.core.exceptions import (
     BaseAppException, 
     create_http_exception,
@@ -42,7 +43,12 @@ async def lifespan(app: FastAPI):
         settings.validate_critical_startup_config()
         logger.info("configuration_validated", provider=settings.LLM_PROVIDER)
         
-        # Future: Initialize vector store, database connections, etc.
+        # Initialize database if configured
+        if settings.DATABASE_URL:
+            await init_database()
+            logger.info("database_initialized")
+        
+        # Future: Initialize vector store, etc.
         
         yield
         
@@ -54,7 +60,12 @@ async def lifespan(app: FastAPI):
         # Shutdown
         logger.info("application_shutdown")
         
-        # Future: Close database connections, cleanup resources
+        # Close database connections
+        if settings.DATABASE_URL:
+            await close_database()
+            logger.info("database_closed")
+        
+        # Future: Cleanup other resources
 
 
 # Create FastAPI app

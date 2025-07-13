@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 from app.core.config import settings
 from app.core.logging import get_logger, get_utc_timestamp, get_utc_datetime
+from app.core.database import db_manager
 
 logger = get_logger(__name__)
 
@@ -44,9 +45,9 @@ def get_uptime_seconds() -> float:
     return (get_utc_datetime() - APP_START_TIME).total_seconds()
 
 
-def check_database_health() -> Dict[str, Any]:
-    """Check database connectivity using centralized validation."""
-    return settings.validate_database_health()
+async def check_database_health() -> Dict[str, Any]:
+    """Check database connectivity using database manager."""
+    return await db_manager.health_check()
 
 
 def check_vector_store_health() -> Dict[str, Any]:
@@ -82,7 +83,7 @@ async def health_check(response: Response):
     Returns detailed system health information.
     """
     checks = {
-        "database": check_database_health(),
+        "database": await check_database_health(),
         "vector_store": check_vector_store_health(),
         "llm": check_llm_health()
     }
