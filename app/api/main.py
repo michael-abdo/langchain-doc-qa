@@ -7,18 +7,21 @@ from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 import time
 import asyncio
 
 from app.core.config import settings
-from app.core.logging import get_logger, LoggingMiddleware, set_correlation_id
+from app.core.logging import get_logger, LoggingMiddleware, set_correlation_id, log_request_error
 from app.core.exceptions import (
     BaseAppException, 
     create_http_exception,
     ConfigurationError,
-    ExternalServiceError
+    ExternalServiceError,
+    create_app_exception_response,
+    create_validation_error_response,
+    create_http_error_response,
+    create_unexpected_error_response
 )
 
 # Get logger
@@ -89,32 +92,22 @@ if not settings.DEBUG:
 # Global exception handlers
 @app.exception_handler(BaseAppException)
 async def handle_app_exception(request: Request, exc: BaseAppException):
-    """Handle custom application exceptions."""
-    logger.error(
+    """Handle custom application exceptions using centralized response factory."""
+    log_request_error(
+        logger, 
         "application_error",
+        request,
         error_code=exc.error_code,
         message=exc.message,
-        details=exc.details,
-        path=request.url.path,
-        method=request.method,
+        details=exc.details
     )
     
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={
-            "error": {
-                "code": exc.error_code,
-                "message": exc.message,
-                "details": exc.details,
-                "correlation_id": request.state.correlation_id if hasattr(request.state, "correlation_id") else None
-            }
-        }
-    )
+    return create_app_exception_response(request, exc)
 
 
 @app.exception_handler(RequestValidationError)
 async def handle_validation_error(request: Request, exc: RequestValidationError):
-    """Handle request validation errors."""
+    """Handle request validation errors using centralized response factory."""
     errors = []
     for error in exc.errors():
         field_path = " -> ".join(str(x) for x in error["loc"])
@@ -124,86 +117,34 @@ async def handle_validation_error(request: Request, exc: RequestValidationError)
             "type": error["type"]
         })
     
-    logger.error(
-        "validation_error",
-        errors=errors,
-        path=request.url.path,
-        method=request.method,
-    )
+    log_request_error(logger, "validation_error", request, errors=errors)
     
-    return JSONResponse(
-        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        content={
-            "error": {
-                "code": "VALIDATION_ERROR",
-                "message": "Request validation failed",
-                "details": {"validation_errors": errors},
-                "correlation_id": request.state.correlation_id if hasattr(request.state, "correlation_id") else None
-            }
-        }
-    )
+    return create_validation_error_response(request, errors)
 
 
 @app.exception_handler(StarletteHTTPException)
 async def handle_http_exception(request: Request, exc: StarletteHTTPException):
-    """Handle generic HTTP exceptions."""
-    logger.error(
-        "http_error",
-        status_code=exc.status_code,
-        detail=exc.detail,
-        path=request.url.path,
-        method=request.method,
-    )
+    """Handle generic HTTP exceptions using centralized response factory."""
+    log_request_error(logger, "http_error", request, status_code=exc.status_code, detail=exc.detail)
     
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={
-            "error": {
-                "code": f"HTTP_{exc.status_code}",
-                "message": exc.detail or "An error occurred",
-                "correlation_id": request.state.correlation_id if hasattr(request.state, "correlation_id") else None
-            }
-        }
-    )
+    return create_http_error_response(request, exc.status_code, exc.detail)
 
 
 @app.exception_handler(Exception)
 async def handle_unexpected_error(request: Request, exc: Exception):
-    """Handle unexpected errors - fail loud but safely."""
-    logger.error(
-        "unexpected_error",
-        error=str(exc),
-        error_type=type(exc).__name__,
-        path=request.url.path,
-        method=request.method,
-        exc_info=True,
+    """Handle unexpected errors using centralized response factory - fail loud but safely."""
+    log_request_error(
+        logger, 
+        "unexpected_error", 
+        request, 
+        error=str(exc), 
+        error_type=type(exc).__name__, 
+        exc_info=True
     )
     
-    # In production, return generic error
-    if not settings.DEBUG:
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={
-                "error": {
-                    "code": "INTERNAL_SERVER_ERROR",
-                    "message": "An unexpected error occurred. Please try again later.",
-                    "correlation_id": request.state.correlation_id if hasattr(request.state, "correlation_id") else None
-                }
-            }
-        )
-    
-    # In debug mode, return detailed error
-    return JSONResponse(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={
-            "error": {
-                "code": "INTERNAL_SERVER_ERROR",
-                "message": str(exc),
-                "type": type(exc).__name__,
-                "correlation_id": request.state.correlation_id if hasattr(request.state, "correlation_id") else None
-            }
-        }
-    )
+    # Use centralized response factory with debug-aware error detail
+    error_detail = f"{str(exc)} (Type: {type(exc).__name__})" if settings.DEBUG else None
+    return create_unexpected_error_response(request, debug=settings.DEBUG, error_detail=error_detail)
 
 
 # Request middleware

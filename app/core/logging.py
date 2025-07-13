@@ -23,6 +23,19 @@ def generate_uuid() -> str:
     return str(uuid.uuid4())
 
 
+def log_request_error(logger, event: str, request, **kwargs):
+    """
+    Centralized request error logging utility.
+    Reduces duplication of request context logging across exception handlers.
+    """
+    logger.error(
+        event,
+        path=request.url.path,
+        method=request.method,
+        **kwargs
+    )
+
+
 def get_correlation_id() -> str:
     """Get current correlation ID or generate a new one."""
     correlation_id = correlation_id_var.get()

@@ -3,7 +3,8 @@ Custom exceptions for the application.
 Follows fail-fast principle with clear, actionable error messages.
 """
 from typing import Optional, Dict, Any
-from fastapi import HTTPException, status
+from fastapi import HTTPException, status, Request
+from fastapi.responses import JSONResponse
 
 
 class BaseAppException(Exception):
@@ -189,6 +190,110 @@ class ExternalServiceError(BaseAppException):
             error_code="EXTERNAL_SERVICE_ERROR",
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             details=details
+        )
+
+
+def get_correlation_id_from_request(request: Request) -> Optional[str]:
+    """
+    Extract correlation ID from request state.
+    Centralized utility to reduce duplication across exception handlers.
+    """
+    return getattr(request.state, "correlation_id", None) if hasattr(request, "state") else None
+
+
+def create_error_response(
+    status_code: int,
+    error_code: str,
+    message: str,
+    details: Optional[Dict[str, Any]] = None,
+    correlation_id: Optional[str] = None
+) -> JSONResponse:
+    """
+    Centralized error response factory.
+    Creates consistent JSON error responses across all exception handlers.
+    
+    Args:
+        status_code: HTTP status code
+        error_code: Application-specific error code
+        message: Human-readable error message
+        details: Optional additional error details
+        correlation_id: Request correlation ID for tracing
+    
+    Returns:
+        JSONResponse with standardized error format
+    """
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "error": {
+                "code": error_code,
+                "message": message,
+                "details": details or {},
+                "correlation_id": correlation_id
+            }
+        }
+    )
+
+
+def create_app_exception_response(request: Request, exc: BaseAppException) -> JSONResponse:
+    """
+    Create error response for custom application exceptions.
+    Uses centralized response factory to ensure consistency.
+    """
+    return create_error_response(
+        status_code=exc.status_code,
+        error_code=exc.error_code,
+        message=exc.message,
+        details=exc.details,
+        correlation_id=get_correlation_id_from_request(request)
+    )
+
+
+def create_validation_error_response(request: Request, errors: list) -> JSONResponse:
+    """
+    Create error response for validation errors.
+    Uses centralized response factory to ensure consistency.
+    """
+    return create_error_response(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        error_code="VALIDATION_ERROR",
+        message="Request validation failed",
+        details={"validation_errors": errors},
+        correlation_id=get_correlation_id_from_request(request)
+    )
+
+
+def create_http_error_response(request: Request, status_code: int, detail: str) -> JSONResponse:
+    """
+    Create error response for HTTP errors.
+    Uses centralized response factory to ensure consistency.
+    """
+    return create_error_response(
+        status_code=status_code,
+        error_code=f"HTTP_{status_code}",
+        message=detail or "An error occurred",
+        correlation_id=get_correlation_id_from_request(request)
+    )
+
+
+def create_unexpected_error_response(request: Request, debug: bool = False, error_detail: str = None) -> JSONResponse:
+    """
+    Create error response for unexpected errors.
+    Uses centralized response factory to ensure consistency.
+    """
+    if debug and error_detail:
+        return create_error_response(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            error_code="INTERNAL_SERVER_ERROR",
+            message=error_detail,
+            correlation_id=get_correlation_id_from_request(request)
+        )
+    else:
+        return create_error_response(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            error_code="INTERNAL_SERVER_ERROR",
+            message="An unexpected error occurred. Please try again later.",
+            correlation_id=get_correlation_id_from_request(request)
         )
 
 
