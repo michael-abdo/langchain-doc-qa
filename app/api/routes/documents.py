@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, func, and_, or_
 from sqlalchemy.orm import selectinload
 
-from app.core.database import get_db
+from app.core.database import get_db, db_manager
 from app.core.logging import get_logger
 from app.core.exceptions import (
     DocumentProcessingError,
@@ -285,19 +285,21 @@ async def get_document(
 ):
     """Get a specific document by ID."""
     try:
-        # Build query
-        query = select(Document).where(
-            and_(Document.id == document_id, Document.is_deleted == False)
-        )
-        
+        # REFACTORED: Using DocumentRepository to eliminate duplicated query pattern
         if include_chunks:
-            query = query.options(selectinload(Document.chunks))
-        
-        result = await db.execute(query)
-        document = result.scalar_one_or_none()
-        
-        if not document:
-            raise NotFoundError("Document", document_id)
+            # For chunks, need custom query with selectinload
+            query = select(Document).where(
+                and_(Document.id == document_id, Document.is_deleted == False)
+            ).options(selectinload(Document.chunks))
+            result = await db.execute(query)
+            document = result.scalar_one_or_none()
+            if not document:
+                raise NotFoundError("Document", document_id)
+        else:
+            # Use repository for simple document retrieval
+            document = await db_manager.document_repo.get_document_or_404(
+                db, str(document_id)
+            )
         
         return DocumentResponse.model_validate(document)
         
@@ -316,16 +318,10 @@ async def update_document(
 ):
     """Update document metadata (tags, metadata)."""
     try:
-        # Get document
-        result = await db.execute(
-            select(Document).where(
-                and_(Document.id == document_id, Document.is_deleted == False)
-            )
+        # REFACTORED: Using DocumentRepository to eliminate duplicated query pattern
+        document = await db_manager.document_repo.get_document_or_404(
+            db, str(document_id)
         )
-        document = result.scalar_one_or_none()
-        
-        if not document:
-            raise NotFoundError("Document", document_id)
         
         # Update fields
         update_data = {}
@@ -361,16 +357,10 @@ async def delete_document(
 ):
     """Delete a document (soft delete by default)."""
     try:
-        # Get document
-        result = await db.execute(
-            select(Document).where(
-                and_(Document.id == document_id, Document.is_deleted == False)
-            )
+        # REFACTORED: Using DocumentRepository to eliminate duplicated query pattern
+        document = await db_manager.document_repo.get_document_or_404(
+            db, str(document_id)
         )
-        document = result.scalar_one_or_none()
-        
-        if not document:
-            raise NotFoundError("Document", document_id)
         
         if hard_delete:
             # Hard delete - remove from vector store and database
@@ -412,15 +402,10 @@ async def get_document_processing_status(
 ):
     """Get document processing status."""
     try:
-        result = await db.execute(
-            select(Document).where(
-                and_(Document.id == document_id, Document.is_deleted == False)
-            )
+        # REFACTORED: Using DocumentRepository to eliminate duplicated query pattern
+        document = await db_manager.document_repo.get_document_or_404(
+            db, str(document_id)
         )
-        document = result.scalar_one_or_none()
-        
-        if not document:
-            raise NotFoundError("Document", document_id)
         
         # Calculate progress percentage
         progress = None

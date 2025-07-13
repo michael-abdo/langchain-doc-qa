@@ -11,7 +11,7 @@ import asyncio
 from datetime import datetime
 
 from app.core.config import settings
-from app.core.logging import get_logger
+from app.core.logging import get_logger, get_utc_datetime
 from app.core.database import db_manager
 from app.core.exceptions import (
     DocumentProcessingError,
@@ -80,7 +80,8 @@ class DocumentProcessor:
         """Generate a safe filename for storage."""
         # Remove unsafe characters and create unique filename
         safe_name = "".join(c for c in original_filename if c.isalnum() or c in "._-")
-        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        # REFACTORED: Using existing utility instead of direct datetime.utcnow()
+        timestamp = get_utc_datetime().strftime("%Y%m%d_%H%M%S")
         name_part, ext_part = os.path.splitext(safe_name)
         return f"{timestamp}_{name_part[:50]}{ext_part}"
     
@@ -269,9 +270,11 @@ class DocumentProcessor:
         update_data = {"processing_status": status.value}
         
         if status == ProcessingStatus.PROCESSING:
-            update_data["processing_started_at"] = datetime.utcnow()
+            # REFACTORED: Using existing utility instead of direct datetime.utcnow()
+            update_data["processing_started_at"] = get_utc_datetime()
         elif status in [ProcessingStatus.COMPLETED, ProcessingStatus.FAILED]:
-            update_data["processing_completed_at"] = datetime.utcnow()
+            # REFACTORED: Using existing utility instead of direct datetime.utcnow()
+            update_data["processing_completed_at"] = get_utc_datetime()
             
         if error_message:
             update_data["processing_error"] = error_message

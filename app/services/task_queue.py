@@ -11,7 +11,7 @@ from enum import Enum
 from dataclasses import dataclass, asdict
 import traceback
 
-from app.core.logging import get_logger
+from app.core.logging import get_logger, get_utc_datetime
 from app.core.config import settings
 
 logger = get_logger(__name__)
@@ -105,7 +105,8 @@ class SimpleTaskQueue:
             args=list(args),
             kwargs=kwargs,
             status=TaskStatus.PENDING,
-            created_at=datetime.utcnow(),
+            # REFACTORED: Using existing utility instead of direct datetime.utcnow()
+            created_at=get_utc_datetime(),
             max_retries=max_retries
         )
         
@@ -201,7 +202,8 @@ class SimpleTaskQueue:
         try:
             # Update task status
             task.status = TaskStatus.RUNNING
-            task.started_at = datetime.utcnow()
+            # REFACTORED: Using existing utility instead of direct datetime.utcnow()
+            task.started_at = get_utc_datetime()
             
             logger.info(
                 "task_execution_started",
@@ -226,7 +228,8 @@ class SimpleTaskQueue:
                 
                 # Task completed successfully
                 task.status = TaskStatus.COMPLETED
-                task.completed_at = datetime.utcnow()
+                # REFACTORED: Using existing utility instead of direct datetime.utcnow()
+                task.completed_at = get_utc_datetime()
                 task.result = result
                 
                 logger.info(
@@ -301,7 +304,8 @@ class SimpleTaskQueue:
     
     async def cleanup_old_tasks(self, max_age_hours: int = 24):
         """Clean up old completed/failed tasks."""
-        cutoff_time = datetime.utcnow() - timedelta(hours=max_age_hours)
+        # REFACTORED: Using existing utility instead of direct datetime.utcnow()
+        cutoff_time = get_utc_datetime() - timedelta(hours=max_age_hours)
         
         tasks_to_remove = []
         for task_id, task in self.tasks.items():

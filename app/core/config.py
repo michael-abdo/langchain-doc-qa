@@ -168,6 +168,36 @@ class Settings(BaseSettings):
             else:
                 raise ConfigurationError(f"Invalid LLM provider: {provider}")
 
+    @staticmethod
+    def create_health_response(
+        service_name: str,
+        is_healthy: bool,
+        details: Dict[str, Any],
+        message: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Standardized health check response factory.
+        
+        REFACTORED: Consolidated from multiple locations to eliminate duplicated health response patterns.
+        Provides consistent structure for all health check responses across the application.
+        
+        Args:
+            service_name: Name of the service being checked
+            is_healthy: Boolean indicating if service is healthy
+            details: Dictionary of detailed health information
+            message: Optional custom message (defaults to generated message)
+            
+        Returns:
+            Standardized health response dictionary
+        """
+        status = "healthy" if is_healthy else "unhealthy"
+        default_message = f"{service_name} is {'operational' if is_healthy else 'experiencing issues'}"
+        
+        return {
+            "status": status,
+            "message": message or default_message,
+            "details": details
+        }
+
 
 def load_settings() -> Settings:
     """

@@ -83,28 +83,34 @@ async def check_document_service_health() -> Dict[str, Any]:
         # Overall health based on critical checks
         is_healthy = checks["models_importable"] and checks["storage_accessible"]
         
-        return {
-            "status": "healthy" if is_healthy else "degraded",
-            "message": "Document service is operational" if is_healthy else "Document service has issues",
-            "details": checks
-        }
+        # REFACTORED: Using centralized health response factory to eliminate duplication
+        return settings.create_health_response(
+            "Document service",
+            is_healthy,
+            checks
+        )
         
     except Exception as e:
-        return {
-            "status": "unhealthy",
-            "message": f"Document service health check failed: {str(e)}",
-            "details": {"error": str(e)}
-        }
+        # REFACTORED: Using centralized health response factory to eliminate duplication
+        return settings.create_health_response(
+            "Document service", 
+            False, 
+            {"error": str(e)},
+            f"Document service health check failed: {str(e)}"
+        )
 
 
 async def check_document_database_health() -> Dict[str, Any]:
     """Check document-specific database health."""
     try:
         if not settings.DATABASE_URL:
-            return {
-                "status": "not_configured",
-                "message": "Database not configured for document storage"
-            }
+            # REFACTORED: Using centralized health response factory
+            return settings.create_health_response(
+                "Document database",
+                False,
+                {},
+                "Database not configured for document storage"
+            )
         
         # Test document table access
         async with db_manager.get_session() as session:
@@ -122,23 +128,26 @@ async def check_document_database_health() -> Dict[str, Any]:
             )
             chunk_count = result.scalar()
             
-            return {
-                "status": "healthy",
-                "message": "Document database is operational",
-                "details": {
+            # REFACTORED: Using centralized health response factory
+            return settings.create_health_response(
+                "Document database",
+                True,
+                {
                     "document_count": document_count,
                     "chunk_count": chunk_count,
                     "tables_accessible": True
                 }
-            }
+            )
             
     except Exception as e:
         logger.error("document_database_health_check_failed", error=str(e))
-        return {
-            "status": "unhealthy",
-            "message": f"Document database health check failed: {str(e)}",
-            "details": {"error": str(e)}
-        }
+        # REFACTORED: Using centralized health response factory
+        return settings.create_health_response(
+            "Document database",
+            False,
+            {"error": str(e)},
+            f"Document database health check failed: {str(e)}"
+        )
 
 
 def get_system_info() -> SystemInfo:

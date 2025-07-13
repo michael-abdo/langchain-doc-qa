@@ -191,8 +191,73 @@ class DatabaseManager:
         return self._initialized
 
 
+class DocumentRepository:
+    """Repository pattern for common document database operations.
+    
+    REFACTORED: Consolidated from multiple locations in documents.py to eliminate duplication.
+    Provides centralized, reusable database operations for Document entities.
+    """
+    
+    @staticmethod
+    async def get_document_by_id(
+        session: AsyncSession, 
+        document_id: str, 
+        include_deleted: bool = False
+    ) -> Optional[Any]:
+        """Get document by ID with optional deleted filter.
+        
+        Args:
+            session: Database session
+            document_id: Document UUID as string
+            include_deleted: Whether to include soft-deleted documents
+            
+        Returns:
+            Document instance or None if not found
+        """
+        from app.models.document import Document  # Import here to avoid circular imports
+        from sqlalchemy import and_
+        
+        query = select(Document).where(Document.id == document_id)
+        if not include_deleted:
+            query = query.where(Document.is_deleted == False)
+        
+        result = await session.execute(query)
+        return result.scalar_one_or_none()
+    
+    @staticmethod
+    async def get_document_or_404(
+        session: AsyncSession, 
+        document_id: str, 
+        include_deleted: bool = False
+    ) -> Any:
+        """Get document by ID or raise NotFoundError.
+        
+        Args:
+            session: Database session
+            document_id: Document UUID as string
+            include_deleted: Whether to include soft-deleted documents
+            
+        Returns:
+            Document instance
+            
+        Raises:
+            NotFoundError: If document not found
+        """
+        from app.core.exceptions import NotFoundError
+        
+        document = await DocumentRepository.get_document_by_id(
+            session, document_id, include_deleted
+        )
+        if not document:
+            raise NotFoundError("Document", document_id)
+        return document
+
+
 # Global database manager instance
 db_manager = DatabaseManager()
+
+# Add repository to database manager for easy access
+db_manager.document_repo = DocumentRepository()
 
 
 # Dependency for FastAPI
