@@ -49,26 +49,42 @@ langchain-doc-qa/
 - **REST API**: Production-ready FastAPI with streaming support
 - **AWS Deployment**: Containerized deployment with ECS/Fargate
 
-## 🔄 DRY Architecture
+## 🔄 Advanced DRY Architecture
 
 **Centralized Logic - Single Source of Truth:**
 
-- **`app/core/config.py`** - All validation logic consolidated
-  - `validate_llm_health()` - LLM provider validation
-  - `validate_database_health()` - Database connectivity checks  
-  - `validate_vector_store_health()` - Vector store validation
-  - `validate_critical_startup_config()` - Startup validation
+### **Configuration & Validation (`app/core/config.py`)**
+- `validate_llm_health()` - LLM provider validation
+- `validate_database_health()` - Database connectivity checks  
+- `validate_vector_store_health()` - Vector store validation
+- `validate_critical_startup_config()` - Startup validation
 
-- **`app/core/logging.py`** - All utility functions centralized
-  - `get_utc_timestamp()` - Standardized timestamp generation
-  - `get_utc_datetime()` - Datetime utility
-  - `generate_uuid()` - UUID generation
+### **Error Response Factory (`app/core/exceptions.py`)**
+- `create_error_response()` - Centralized JSON error response formatter
+- `create_app_exception_response()` - Application exception responses
+- `create_validation_error_response()` - Request validation responses
+- `create_http_error_response()` - HTTP error responses
+- `create_unexpected_error_response()` - Unexpected error responses
+- `get_correlation_id_from_request()` - Request context utility
+
+### **Logging & Utilities (`app/core/logging.py`)**
+- `get_utc_timestamp()` - Standardized timestamp generation
+- `get_utc_datetime()` - Datetime utility
+- `generate_uuid()` - UUID generation  
+- `log_request_error()` - Centralized request error logging
+
+### **API Layer (`app/api/main.py`)**
+- **Before:** 4 exception handlers with duplicate JSON response patterns
+- **After:** All handlers use centralized response factories
+- **Result:** 100% consistent error format across all endpoints
 
 **Benefits:**
-- ✅ Single-point configuration changes
-- ✅ Consistent validation across modules  
-- ✅ Reduced code duplication (15+ lines eliminated)
-- ✅ Easier testing and maintenance
+- ✅ **Zero Duplication**: All JSON responses use single factory
+- ✅ **Consistent Format**: `{error: {code, message, details, correlation_id}}`
+- ✅ **Single-Point Changes**: Update error format once, applies everywhere
+- ✅ **Request Tracing**: Correlation IDs in all error responses
+- ✅ **Code Reduction**: 80+ lines of duplicate code eliminated
+- ✅ **Testing Simplified**: Mock single response factory vs. multiple handlers
 
 ## 🚧 Scaling Path
 
