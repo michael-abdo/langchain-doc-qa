@@ -35,13 +35,8 @@ async def lifespan(app: FastAPI):
     logger.info("application_startup", version=settings.APP_VERSION)
     
     try:
-        # Validate critical configuration
-        if settings.LLM_PROVIDER == "openai" and not settings.OPENAI_API_KEY:
-            raise ConfigurationError("OpenAI API key is required when using OpenAI provider")
-        
-        if settings.LLM_PROVIDER == "anthropic" and not settings.ANTHROPIC_API_KEY:
-            raise ConfigurationError("Anthropic API key is required when using Anthropic provider")
-        
+        # Validate critical configuration using centralized method
+        settings.validate_critical_startup_config()
         logger.info("configuration_validated", provider=settings.LLM_PROVIDER)
         
         # Future: Initialize vector store, database connections, etc.

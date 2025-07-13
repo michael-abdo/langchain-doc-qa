@@ -2,7 +2,7 @@
 Core configuration module with environment variable validation.
 Follows fail-fast principle - validates all config at startup.
 """
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field, validator, ValidationError
 import sys
@@ -106,6 +106,67 @@ class Settings(BaseSettings):
         if v >= chunk_size:
             raise ValueError(f"Chunk overlap ({v}) must be less than chunk size ({chunk_size})")
         return v
+
+
+    def validate_llm_health(self) -> Dict[str, Any]:
+        """
+        Centralized LLM health validation logic.
+        Used by both startup validation and health checks.
+        """
+        has_key = False
+        if self.LLM_PROVIDER == "openai":
+            has_key = bool(self.OPENAI_API_KEY)
+        elif self.LLM_PROVIDER == "anthropic":
+            has_key = bool(self.ANTHROPIC_API_KEY)
+        
+        return {
+            "status": "healthy" if has_key else "unhealthy",
+            "provider": self.LLM_PROVIDER,
+            "model": self.LLM_MODEL,
+            "api_key_configured": has_key,
+            "message": "LLM provider is configured" if has_key else "LLM API key not configured"
+        }
+    
+    def validate_database_health(self) -> Dict[str, Any]:
+        """
+        Centralized database health validation logic.
+        Used by health checks and startup validation.
+        """
+        # TODO: Implement actual database health check
+        return {
+            "status": "not_configured" if not self.DATABASE_URL else "healthy",
+            "message": "Database not configured" if not self.DATABASE_URL else "Database is healthy",
+            "url_configured": bool(self.DATABASE_URL)
+        }
+    
+    def validate_vector_store_health(self) -> Dict[str, Any]:
+        """
+        Centralized vector store health validation logic.
+        Used by health checks and startup validation.
+        """
+        # TODO: Implement actual vector store health check
+        return {
+            "status": "healthy",
+            "type": self.VECTOR_STORE_TYPE,
+            "message": f"{self.VECTOR_STORE_TYPE} vector store is ready"
+        }
+
+    def validate_critical_startup_config(self) -> None:
+        """
+        Validates critical configuration at startup.
+        Raises ConfigurationError if validation fails.
+        """
+        from app.core.exceptions import ConfigurationError
+        
+        llm_health = self.validate_llm_health()
+        if llm_health["status"] != "healthy":
+            provider = self.LLM_PROVIDER
+            if provider == "openai":
+                raise ConfigurationError("OpenAI API key is required when using OpenAI provider")
+            elif provider == "anthropic":
+                raise ConfigurationError("Anthropic API key is required when using Anthropic provider")
+            else:
+                raise ConfigurationError(f"Invalid LLM provider: {provider}")
 
 
 def load_settings() -> Settings:

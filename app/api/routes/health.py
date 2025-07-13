@@ -2,7 +2,6 @@
 Health check and monitoring endpoints.
 Provides comprehensive system health information.
 """
-from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 import psutil
 import os
@@ -10,7 +9,7 @@ from fastapi import APIRouter, Response, status
 from pydantic import BaseModel
 
 from app.core.config import settings
-from app.core.logging import get_logger
+from app.core.logging import get_logger, get_utc_timestamp, get_utc_datetime
 
 logger = get_logger(__name__)
 
@@ -36,49 +35,28 @@ class SystemInfo(BaseModel):
     process_memory_mb: float
 
 
-# Track application start time
-APP_START_TIME = datetime.now(timezone.utc)
+# Track application start time using centralized utility
+APP_START_TIME = get_utc_datetime()
 
 
 def get_uptime_seconds() -> float:
     """Calculate application uptime in seconds."""
-    return (datetime.now(timezone.utc) - APP_START_TIME).total_seconds()
+    return (get_utc_datetime() - APP_START_TIME).total_seconds()
 
 
 def check_database_health() -> Dict[str, Any]:
-    """Check database connectivity (placeholder for now)."""
-    # TODO: Implement actual database health check
-    return {
-        "status": "healthy" if not settings.DATABASE_URL else "not_configured",
-        "message": "Database not configured" if not settings.DATABASE_URL else "Database is healthy"
-    }
+    """Check database connectivity using centralized validation."""
+    return settings.validate_database_health()
 
 
 def check_vector_store_health() -> Dict[str, Any]:
-    """Check vector store health."""
-    # TODO: Implement actual vector store health check
-    return {
-        "status": "healthy",
-        "type": settings.VECTOR_STORE_TYPE,
-        "message": f"{settings.VECTOR_STORE_TYPE} vector store is ready"
-    }
+    """Check vector store health using centralized validation."""
+    return settings.validate_vector_store_health()
 
 
 def check_llm_health() -> Dict[str, Any]:
-    """Check LLM provider connectivity."""
-    has_key = False
-    if settings.LLM_PROVIDER == "openai":
-        has_key = bool(settings.OPENAI_API_KEY)
-    elif settings.LLM_PROVIDER == "anthropic":
-        has_key = bool(settings.ANTHROPIC_API_KEY)
-    
-    return {
-        "status": "healthy" if has_key else "unhealthy",
-        "provider": settings.LLM_PROVIDER,
-        "model": settings.LLM_MODEL,
-        "api_key_configured": has_key,
-        "message": "LLM provider is configured" if has_key else "LLM API key not configured"
-    }
+    """Check LLM provider connectivity using centralized validation."""
+    return settings.validate_llm_health()
 
 
 def get_system_info() -> SystemInfo:
@@ -119,7 +97,7 @@ async def health_check(response: Response):
     
     health_status = HealthStatus(
         status=overall_status,
-        timestamp=datetime.now(timezone.utc).isoformat(),
+        timestamp=get_utc_timestamp(),
         version=settings.APP_VERSION,
         uptime_seconds=get_uptime_seconds(),
         checks=checks
@@ -140,7 +118,7 @@ async def liveness_check():
     Simple liveness check for container orchestration.
     Returns 200 if the application is running.
     """
-    return {"status": "alive", "timestamp": datetime.now(timezone.utc).isoformat()}
+    return {"status": "alive", "timestamp": get_utc_timestamp()}
 
 
 @router.get("/health/ready", tags=["health"])
@@ -171,7 +149,7 @@ async def readiness_check(response: Response):
     
     return {
         "status": "ready",
-        "timestamp": datetime.now(timezone.utc).isoformat()
+        "timestamp": get_utc_timestamp()
     }
 
 

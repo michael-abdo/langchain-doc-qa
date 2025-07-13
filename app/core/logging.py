@@ -7,6 +7,7 @@ import sys
 import uuid
 from contextvars import ContextVar
 from typing import Optional, Dict, Any
+from datetime import datetime, timezone
 import structlog
 from structlog.stdlib import LoggerFactory
 from pythonjsonlogger import jsonlogger
@@ -17,11 +18,16 @@ from app.core.config import settings
 correlation_id_var: ContextVar[Optional[str]] = ContextVar("correlation_id", default=None)
 
 
+def generate_uuid() -> str:
+    """Generate UUID string. Centralized UUID utility."""
+    return str(uuid.uuid4())
+
+
 def get_correlation_id() -> str:
     """Get current correlation ID or generate a new one."""
     correlation_id = correlation_id_var.get()
     if correlation_id is None:
-        correlation_id = str(uuid.uuid4())
+        correlation_id = generate_uuid()
         correlation_id_var.set(correlation_id)
     return correlation_id
 
@@ -29,7 +35,7 @@ def get_correlation_id() -> str:
 def set_correlation_id(correlation_id: Optional[str] = None) -> str:
     """Set correlation ID for current context."""
     if correlation_id is None:
-        correlation_id = str(uuid.uuid4())
+        correlation_id = generate_uuid()
     correlation_id_var.set(correlation_id)
     return correlation_id
 
@@ -127,7 +133,7 @@ class LoggingMiddleware:
             correlation_id = headers.get(b"x-correlation-id", b"").decode("utf-8")
             
             if not correlation_id:
-                correlation_id = str(uuid.uuid4())
+                correlation_id = generate_uuid()
             
             # Set correlation ID for this request
             set_correlation_id(correlation_id)
@@ -167,6 +173,17 @@ class LoggingMiddleware:
                 )
         else:
             await self.app(scope, receive, send)
+
+
+# Datetime utility functions to reduce duplication
+def get_utc_timestamp() -> str:
+    """Get current UTC timestamp in ISO format. Centralized datetime utility."""
+    return datetime.now(timezone.utc).isoformat()
+
+
+def get_utc_datetime() -> datetime:
+    """Get current UTC datetime object. Centralized datetime utility."""
+    return datetime.now(timezone.utc)
 
 
 # Initialize logging on module import
