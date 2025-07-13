@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from app.core.config import settings
 from app.core.logging import get_logger, get_utc_timestamp, get_utc_datetime
 from app.core.database import db_manager
+from sqlalchemy import text
 
 logger = get_logger(__name__)
 
@@ -60,6 +61,86 @@ def check_llm_health() -> Dict[str, Any]:
     return settings.validate_llm_health()
 
 
+async def check_document_service_health() -> Dict[str, Any]:
+    """Check document processing service health."""
+    try:
+        # Check if models can be imported
+        from app.models.document import Document, DocumentChunk
+        
+        # Check if document storage directory exists or can be created
+        import os
+        storage_path = "/tmp/document_storage"  # This would come from config in real app
+        
+        checks = {
+            "models_importable": True,
+            "storage_accessible": os.access(os.path.dirname(storage_path), os.W_OK),
+            "supported_file_types": settings.ALLOWED_FILE_TYPES,
+            "max_file_size_mb": settings.MAX_FILE_SIZE_MB,
+            "chunk_size": settings.CHUNK_SIZE,
+            "chunk_overlap": settings.CHUNK_OVERLAP
+        }
+        
+        # Overall health based on critical checks
+        is_healthy = checks["models_importable"] and checks["storage_accessible"]
+        
+        return {
+            "status": "healthy" if is_healthy else "degraded",
+            "message": "Document service is operational" if is_healthy else "Document service has issues",
+            "details": checks
+        }
+        
+    except Exception as e:
+        return {
+            "status": "unhealthy",
+            "message": f"Document service health check failed: {str(e)}",
+            "details": {"error": str(e)}
+        }
+
+
+async def check_document_database_health() -> Dict[str, Any]:
+    """Check document-specific database health."""
+    try:
+        if not settings.DATABASE_URL:
+            return {
+                "status": "not_configured",
+                "message": "Database not configured for document storage"
+            }
+        
+        # Test document table access
+        async with db_manager.get_session() as session:
+            from app.models.document import Document
+            
+            # Test query - count documents
+            result = await session.execute(
+                text("SELECT COUNT(*) FROM documents WHERE is_deleted = false")
+            )
+            document_count = result.scalar()
+            
+            # Test query - count chunks
+            result = await session.execute(
+                text("SELECT COUNT(*) FROM document_chunks")
+            )
+            chunk_count = result.scalar()
+            
+            return {
+                "status": "healthy",
+                "message": "Document database is operational",
+                "details": {
+                    "document_count": document_count,
+                    "chunk_count": chunk_count,
+                    "tables_accessible": True
+                }
+            }
+            
+    except Exception as e:
+        logger.error("document_database_health_check_failed", error=str(e))
+        return {
+            "status": "unhealthy",
+            "message": f"Document database health check failed: {str(e)}",
+            "details": {"error": str(e)}
+        }
+
+
 def get_system_info() -> SystemInfo:
     """Get system resource information."""
     process = psutil.Process(os.getpid())
@@ -85,7 +166,9 @@ async def health_check(response: Response):
     checks = {
         "database": await check_database_health(),
         "vector_store": check_vector_store_health(),
-        "llm": check_llm_health()
+        "llm": check_llm_health(),
+        "document_service": await check_document_service_health(),
+        "document_database": await check_document_database_health()
     }
     
     # Determine overall health status
@@ -161,6 +244,35 @@ async def system_info():
     Useful for monitoring and debugging.
     """
     return get_system_info()
+
+
+@router.get("/health/tasks", tags=["monitoring"])
+async def task_queue_health():
+    """
+    Get task queue health and statistics.
+    """
+    try:
+        from app.services.task_queue import task_queue
+        stats = await task_queue.get_queue_stats()
+        
+        # Determine health status
+        is_healthy = (
+            stats["workers_started"] and
+            stats["running_tasks"] <= stats["max_workers"]
+        )
+        
+        return {
+            "status": "healthy" if is_healthy else "degraded",
+            "message": "Task queue is operational" if is_healthy else "Task queue has issues",
+            "stats": stats
+        }
+        
+    except Exception as e:
+        return {
+            "status": "unhealthy",
+            "message": f"Task queue health check failed: {str(e)}",
+            "error": str(e)
+        }
 
 
 @router.get("/metrics", tags=["monitoring"])

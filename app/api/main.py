@@ -48,7 +48,10 @@ async def lifespan(app: FastAPI):
             await init_database()
             logger.info("database_initialized")
         
-        # Future: Initialize vector store, etc.
+        # Initialize task queue handlers
+        from app.services.task_queue import register_task_handlers
+        register_task_handlers()
+        logger.info("task_queue_initialized")
         
         yield
         
@@ -65,7 +68,10 @@ async def lifespan(app: FastAPI):
             await close_database()
             logger.info("database_closed")
         
-        # Future: Cleanup other resources
+        # Shutdown task queue
+        from app.services.task_queue import task_queue
+        await task_queue.shutdown()
+        logger.info("task_queue_shutdown")
 
 
 # Create FastAPI app
@@ -202,10 +208,10 @@ async def root():
 
 
 # Import and include routers
-from app.api.routes import health
+from app.api.routes import health, documents
 app.include_router(health.router, prefix=settings.API_PREFIX, tags=["health"])
-# from app.api.routes import documents, query
-# app.include_router(documents.router, prefix=settings.API_PREFIX, tags=["documents"])
+app.include_router(documents.router, prefix=settings.API_PREFIX, tags=["documents"])
+# from app.api.routes import query
 # app.include_router(query.router, prefix=settings.API_PREFIX, tags=["query"])
 
 
