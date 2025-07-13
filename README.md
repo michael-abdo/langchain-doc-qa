@@ -49,6 +49,27 @@ langchain-doc-qa/
 - **REST API**: Production-ready FastAPI with streaming support
 - **AWS Deployment**: Containerized deployment with ECS/Fargate
 
+## 🔄 DRY Architecture
+
+**Centralized Logic - Single Source of Truth:**
+
+- **`app/core/config.py`** - All validation logic consolidated
+  - `validate_llm_health()` - LLM provider validation
+  - `validate_database_health()` - Database connectivity checks  
+  - `validate_vector_store_health()` - Vector store validation
+  - `validate_critical_startup_config()` - Startup validation
+
+- **`app/core/logging.py`** - All utility functions centralized
+  - `get_utc_timestamp()` - Standardized timestamp generation
+  - `get_utc_datetime()` - Datetime utility
+  - `generate_uuid()` - UUID generation
+
+**Benefits:**
+- ✅ Single-point configuration changes
+- ✅ Consistent validation across modules  
+- ✅ Reduced code duplication (15+ lines eliminated)
+- ✅ Easier testing and maintenance
+
 ## 🚧 Scaling Path
 
 This POC is designed to scale to the full enterprise stack:
