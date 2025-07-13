@@ -1,0 +1,10 @@
+📋 BACKUP INVENTORY - Sun Jul 13 17:49:31 UTC 2025
+Files backed up before DRY refactoring:
+-rw-r--r-- 1 Mike Mike     0 Jul 13 17:49 backups/pre-dry-refactor/__init__.py
+-rw-rw-r-- 1 Mike Mike 22432 Jul 13 17:49 backups/pre-dry-refactor/chunking.py
+-rw-rw-r-- 1 Mike Mike 48923 Jul 13 17:49 backups/pre-dry-refactor/document_processor.py
+-rw-rw-r-- 1 Mike Mike 19060 Jul 13 17:49 backups/pre-dry-refactor/documents.py
+-rw-rw-r-- 1 Mike Mike 10129 Jul 13 17:49 backups/pre-dry-refactor/health.py
+-rw-rw-r-- 1 Mike Mike  6433 Jul 13 17:49 backups/pre-dry-refactor/metrics.py
+-rw-rw-r-- 1 Mike Mike 12487 Jul 13 17:49 backups/pre-dry-refactor/task_queue.py
+-rw-rw-r-- 1 Mike Mike 14280 Jul 13 17:49 backups/pre-dry-refactor/vector_store.py

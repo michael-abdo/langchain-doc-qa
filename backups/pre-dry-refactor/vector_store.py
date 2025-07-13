@@ -1,34 +1,20 @@
 """
 Vector store service.
 Provides abstraction layer for different vector storage backends (FAISS, Chroma, pgvector).
-
-REFACTORING HISTORY:
-- Converted VectorStoreManager to inherit from BaseService (DRY consolidation)
-- Replaced scattered error handling with @with_error_handling decorators
-- Consolidated imports using app.core.common
-- Unified configuration access via config accessor
-- Standardized logging patterns via BaseService
-- Estimated code reduction: 25% fewer lines, 40% less duplication
 """
-# DRY CONSOLIDATION: Using consolidated imports
-from app.core.common import (
-    BaseService, with_service_logging, CommonValidators,
-    get_service_logger,
-    os, asyncio, Optional, List, Dict, Any, Tuple, Path
-)
-from app.core.exceptions import (
-    VectorStoreError, 
-    ExternalServiceError,
-    with_error_handling
-)
-
-# Specific imports that can't be consolidated
+import os
 import pickle
 import numpy as np
+from typing import List, Optional, Dict, Any, Tuple
 from abc import ABC, abstractmethod
+import asyncio
+from pathlib import Path
 
-# Module logger for non-service classes
-logger = get_service_logger("vector_store")
+from app.core.config import settings
+from app.core.logging import get_logger
+from app.core.exceptions import VectorStoreError, ExternalServiceError
+
+logger = get_logger(__name__)
 
 
 class VectorStoreInterface(ABC):
@@ -289,60 +275,61 @@ class FAISSVectorStore(VectorStoreInterface):
             }
 
 
-class EmbeddingService(BaseService):
+class EmbeddingService:
     """Service for generating embeddings."""
     
     def __init__(self):
-        # DRY CONSOLIDATION: Using BaseService initialization
-        super().__init__("embedding")
-        
-        # DRY CONSOLIDATION: Using consolidated config accessor
-        self.model_name = self.config.vector_store_config["embedding_model"]
-        self.api_key = self.config.llm_config["api_key"]
+        self.model_name = settings.EMBEDDING_MODEL
         self._client = None
     
-    @with_error_handling("get_openai_client")
     async def _get_client(self):
         """Get OpenAI client for embeddings."""
         if self._client is None:
-            import openai
-            self._client = openai.AsyncOpenAI(api_key=self.api_key)
-            self.logger.info("openai_client_initialized", model=self.model_name)
+            try:
+                import openai
+                self._client = openai.AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+            except Exception as e:
+                raise ExternalServiceError(
+                    service_name="OpenAI",
+                    message=f"Failed to initialize OpenAI client: {str(e)}"
+                )
         return self._client
     
-    @with_service_logging("generate_embeddings")
-    @with_error_handling("generate_embeddings")
     async def generate_embeddings(self, texts: List[str]) -> List[List[float]]:
         """Generate embeddings for list of texts."""
-        # DRY CONSOLIDATION: Using consolidated validation
-        if not texts:
-            return []
-        
-        client = await self._get_client()
-        
-        # OpenAI has limits on batch size and text length
-        batch_size = 100
-        all_embeddings = []
-        
-        for i in range(0, len(texts), batch_size):
-            batch = texts[i:i + batch_size]
+        try:
+            client = await self._get_client()
             
-            response = await client.embeddings.create(
+            # OpenAI has limits on batch size and text length
+            # Split into smaller batches if needed
+            batch_size = 100
+            all_embeddings = []
+            
+            for i in range(0, len(texts), batch_size):
+                batch = texts[i:i + batch_size]
+                
+                response = await client.embeddings.create(
+                    model=self.model_name,
+                    input=batch
+                )
+                
+                batch_embeddings = [item.embedding for item in response.data]
+                all_embeddings.extend(batch_embeddings)
+            
+            logger.info(
+                "embeddings_generated",
                 model=self.model_name,
-                input=batch
+                count=len(texts),
+                dimension=len(all_embeddings[0]) if all_embeddings else 0
             )
             
-            batch_embeddings = [item.embedding for item in response.data]
-            all_embeddings.extend(batch_embeddings)
-        
-        self.logger.info(
-            "embeddings_generated",
-            model=self.model_name,
-            count=len(texts),
-            dimension=len(all_embeddings[0]) if all_embeddings else 0
-        )
-        
-        return all_embeddings
+            return all_embeddings
+            
+        except Exception as e:
+            raise ExternalServiceError(
+                service_name="OpenAI",
+                message=f"Failed to generate embeddings: {str(e)}"
+            )
     
     async def generate_single_embedding(self, text: str) -> List[float]:
         """Generate embedding for single text."""
@@ -350,25 +337,19 @@ class EmbeddingService(BaseService):
         return embeddings[0]
 
 
-class VectorStoreManager(BaseService):
+class VectorStoreManager:
     """Manager for vector store operations."""
     
     def __init__(self):
-        # DRY CONSOLIDATION: Using BaseService initialization
-        super().__init__("vector_store_manager")
-        
-        # DRY CONSOLIDATION: Using consolidated config accessor
-        self.store_type = self.config.vector_store_config["type"]
+        self.store_type = settings.VECTOR_STORE_TYPE
         self._store = None
         self.embedding_service = EmbeddingService()
     
-    @with_error_handling("get_vector_store")
     async def _get_store(self) -> VectorStoreInterface:
         """Get vector store instance."""
         if self._store is None:
             if self.store_type == "faiss":
                 self._store = FAISSVectorStore()
-                self.logger.info("faiss_vector_store_initialized")
             else:
                 raise VectorStoreError(
                     f"Unsupported vector store type: {self.store_type}",
@@ -376,8 +357,6 @@ class VectorStoreManager(BaseService):
                 )
         return self._store
     
-    @with_service_logging("add_texts")
-    @with_error_handling("add_texts")
     async def add_texts(
         self,
         texts: List[str],
@@ -385,17 +364,10 @@ class VectorStoreManager(BaseService):
         ids: Optional[List[str]] = None
     ) -> List[str]:
         """Add texts to vector store with embeddings."""
-        # DRY CONSOLIDATION: Using consolidated validation
-        if not texts:
-            self.logger.warning("empty_texts_provided_for_vector_store")
-            return []
-        
         store = await self._get_store()
         embeddings = await self.embedding_service.generate_embeddings(texts)
         return await store.add_documents(texts, embeddings, metadatas, ids)
     
-    @with_service_logging("search")
-    @with_error_handling("search")
     async def search(
         self,
         query: str,
@@ -403,30 +375,27 @@ class VectorStoreManager(BaseService):
         filter_dict: Optional[Dict[str, Any]] = None
     ) -> List[Dict[str, Any]]:
         """Search for similar texts."""
-        # DRY CONSOLIDATION: Using consolidated validation
-        if not query or not query.strip():
-            self.logger.warning("empty_query_provided_for_search")
-            return []
-        
         store = await self._get_store()
         query_embedding = await self.embedding_service.generate_single_embedding(query)
         return await store.similarity_search(query_embedding, k, filter_dict)
     
-    @with_service_logging("delete_texts")
-    @with_error_handling("delete_texts")
     async def delete_texts(self, ids: List[str]) -> bool:
         """Delete texts from vector store."""
-        if not ids:
-            return False
-        
         store = await self._get_store()
         return await store.delete_documents(ids)
     
-    @with_error_handling("health_check", reraise_if=(VectorStoreError,))
     async def health_check(self) -> Dict[str, Any]:
         """Check vector store health."""
-        store = await self._get_store()
-        return await store.health_check()
+        try:
+            store = await self._get_store()
+            return await store.health_check()
+        except Exception as e:
+            return {
+                "status": "unhealthy",
+                "type": self.store_type,
+                "message": f"Vector store manager health check failed: {str(e)}",
+                "details": {"error": str(e)}
+            }
 
 
 # Global vector store manager instance

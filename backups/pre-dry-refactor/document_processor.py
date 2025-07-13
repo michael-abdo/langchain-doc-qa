@@ -1,41 +1,35 @@
 """
 Document processing service.
 Handles file upload, validation, content extraction, and processing orchestration.
-
-REFACTORING HISTORY:
-- Converted to inherit from BaseService (DRY consolidation)
-- Replaced scattered error handling with @with_error_handling decorators
-- Consolidated validation logic using CommonValidators and utility functions
-- Unified configuration access via config accessor
-- Standardized logging patterns via @with_service_logging
-- Estimated code reduction: 40% fewer lines, 60% less duplication
 """
-# DRY CONSOLIDATION: Using consolidated imports
-from app.core.common import (
-    BaseService, with_service_logging, CommonValidators,
-    create_safe_filename, calculate_content_hash, validate_file_size,
-    validate_file_type, create_error_context, get_utc_datetime,
-    os, asyncio, Optional, Tuple, Dict, Any, List, Path,
-    dataclass, field, asynccontextmanager
-)
-from app.core.exceptions import (
-    DocumentProcessingError,
-    FileTooLargeError, 
-    UnsupportedFileTypeError,
-    ValidationError,
-    with_error_handling,
-    handle_service_error
-)
-from app.core.database import db_manager, with_db_session, AsyncSession
-from sqlalchemy import select, update, delete
-
-# Specific imports that can't be consolidated
+import os
+import hashlib
 import mimetypes
 import psutil
 import resource
+from typing import Optional, Tuple, Dict, Any, List
+from pathlib import Path
+import asyncio
+from datetime import datetime
+from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
+
+from app.core.config import settings
+from app.core.logging import get_logger, get_utc_datetime
+from app.core.database import db_manager
+from app.core.exceptions import (
+    DocumentProcessingError,
+    FileTooLargeError,
+    UnsupportedFileTypeError,
+    ValidationError
+)
 from app.models.document import Document, DocumentChunk
 from app.schemas.document import DocumentCreate, ProcessingStatus
 from app.services.metrics import metrics_service
+from sqlalchemy import select, update, delete
+from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -162,17 +156,14 @@ class ProcessingTransaction:
         )
 
 
-class DocumentProcessor(BaseService):
+class DocumentProcessor:
     """Handles document processing operations with memory monitoring."""
     
     def __init__(self):
-        # DRY CONSOLIDATION: Using BaseService initialization
-        super().__init__("document_processor")
-        
-        # DRY CONSOLIDATION: Using consolidated config accessor
-        self.supported_types = self.config.get_supported_file_types()
-        self.max_size_bytes = self.config.get_file_size_limit_bytes()
-        self.max_memory_mb = self.config.processing_config["max_memory_mb"]
+        self.supported_types = set(settings.ALLOWED_FILE_TYPES)
+        self.max_size_bytes = settings.MAX_FILE_SIZE_MB * 1024 * 1024
+        # Memory limits for processing (in MB)
+        self.max_memory_mb = getattr(settings, 'MAX_PROCESSING_MEMORY_MB', 512)
         self.memory_check_interval = 100  # Check memory every N operations
     
     def get_memory_usage_mb(self) -> float:
@@ -347,8 +338,6 @@ class DocumentProcessor(BaseService):
                 document_id=document_id
             )
         
-    @with_service_logging("file_validation")
-    @with_error_handling("file validation", reraise_if=(ValidationError, FileTooLargeError, UnsupportedFileTypeError))
     async def validate_file(self, filename: str, content: bytes) -> None:
         """
         Validate uploaded file meets requirements with enhanced security checks.
@@ -362,12 +351,21 @@ class DocumentProcessor(BaseService):
             UnsupportedFileTypeError: If file type not supported
             ValidationError: If file fails security checks
         """
-        # DRY CONSOLIDATION: Using consolidated validators
-        CommonValidators.validate_content_not_empty(content, "file validation")
-        validate_file_size(len(content))
-        file_extension = validate_file_type(filename)
-        
+        # Check file size
         file_size_bytes = len(content)
+        if file_size_bytes == 0:
+            raise ValidationError(f"Empty file uploaded: {filename}")
+            
+        if file_size_bytes > self.max_size_bytes:
+            file_size_mb = file_size_bytes / (1024 * 1024)
+            raise FileTooLargeError(
+                filename=filename,
+                size_mb=file_size_mb,
+                max_size_mb=settings.MAX_FILE_SIZE_MB
+            )
+        
+        # Check file extension
+        file_extension = Path(filename).suffix.lower()
         
         # Check memory before processing
         estimated_memory = self.estimate_required_memory(file_size_bytes, file_extension)
@@ -381,6 +379,13 @@ class DocumentProcessor(BaseService):
         
         # Check disk space before processing
         self.check_disk_space(file_size_bytes)
+        
+        if file_extension not in self.supported_types:
+            raise UnsupportedFileTypeError(
+                filename=filename,
+                file_type=file_extension,
+                supported_types=list(self.supported_types)
+            )
         
         # MIME type verification
         mime_type = mimetypes.guess_type(filename)[0]
@@ -427,13 +432,31 @@ class DocumentProcessor(BaseService):
     
     def calculate_file_hash(self, content: bytes) -> str:
         """Calculate SHA-256 hash of file content."""
-        # DRY CONSOLIDATION: Using consolidated function
-        return calculate_content_hash(content)
+        return hashlib.sha256(content).hexdigest()
     
     def generate_safe_filename(self, original_filename: str) -> str:
         """Generate a safe filename for storage with directory traversal prevention."""
-        # DRY CONSOLIDATION: Using consolidated function
-        return create_safe_filename(original_filename)
+        # Prevent directory traversal attacks
+        if any(dangerous in original_filename for dangerous in ['..', '/', '\\', '\x00']):
+            raise ValidationError(f"Filename contains dangerous characters: {original_filename}")
+        
+        # Extract just the filename component (no path)
+        base_filename = os.path.basename(original_filename)
+        
+        # Remove unsafe characters and create unique filename
+        safe_name = "".join(c for c in base_filename if c.isalnum() or c in "._-")
+        if not safe_name:
+            raise ValidationError(f"Filename contains no valid characters: {original_filename}")
+            
+        # REFACTORED: Using existing utility instead of direct datetime.utcnow()
+        timestamp = get_utc_datetime().strftime("%Y%m%d_%H%M%S")
+        name_part, ext_part = os.path.splitext(safe_name)
+        
+        # Ensure extension is safe
+        if ext_part and ext_part not in self.supported_types:
+            raise ValidationError(f"Invalid file extension: {ext_part}")
+            
+        return f"{timestamp}_{name_part[:50]}{ext_part}"
     
     async def extract_text_content(self, filename: str, content: bytes) -> Tuple[str, Optional[str]]:
         """

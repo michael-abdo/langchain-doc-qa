@@ -1,10 +1,20 @@
 """
 Custom exceptions for the application.
 Follows fail-fast principle with clear, actionable error messages.
+Includes common error handling patterns to eliminate duplication.
 """
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Callable, TypeVar, Union
+from functools import wraps
+import asyncio
 from fastapi import HTTPException, status, Request
 from fastapi.responses import JSONResponse
+
+from app.core.logging import get_logger
+
+# Type hint for decorated functions
+F = TypeVar('F', bound=Callable[..., Any])
+
+logger = get_logger(__name__)
 
 
 class BaseAppException(Exception):
@@ -307,3 +317,177 @@ def create_http_exception(exc: BaseAppException) -> HTTPException:
             "details": exc.details
         }
     )
+
+
+# ============================================================================
+# COMMON ERROR HANDLING PATTERNS - DRY CONSOLIDATION
+# ============================================================================
+
+def handle_service_error(
+    operation: str,
+    error: Exception,
+    context: Optional[Dict[str, Any]] = None,
+    raise_as: Optional[type] = None
+) -> None:
+    """
+    Consolidated error handling pattern for services.
+    Replaces repeated try-catch-log-raise patterns.
+    
+    Args:
+        operation: Description of operation that failed
+        error: The original exception
+        context: Additional context for logging
+        raise_as: Exception class to raise (defaults to DocumentProcessingError)
+    """
+    error_context = context or {}
+    error_context.update({
+        "operation": operation,
+        "error": str(error),
+        "error_type": type(error).__name__
+    })
+    
+    logger.error(f"{operation}_failed", **error_context, exc_info=True)
+    
+    # Determine what exception to raise
+    if raise_as:
+        raise raise_as(f"{operation} failed: {str(error)}")
+    else:
+        raise DocumentProcessingError(f"{operation} failed: {str(error)}")
+
+
+def with_error_handling(
+    operation: str,
+    context: Optional[Dict[str, Any]] = None,
+    raise_as: Optional[type] = None,
+    reraise_if: Optional[tuple] = None
+):
+    """
+    Decorator to add consistent error handling to service methods.
+    
+    Args:
+        operation: Description of operation for logging
+        context: Additional context for logging
+        raise_as: Exception class to raise on error
+        reraise_if: Tuple of exception types to reraise without modification
+    """
+    def decorator(func: F) -> F:
+        @wraps(func)
+        async def async_wrapper(*args, **kwargs):
+            try:
+                return await func(*args, **kwargs)
+            except Exception as e:
+                # Re-raise specific exceptions without modification
+                if reraise_if and isinstance(e, reraise_if):
+                    raise
+                
+                handle_service_error(operation, e, context, raise_as)
+        
+        @wraps(func)
+        def sync_wrapper(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                # Re-raise specific exceptions without modification
+                if reraise_if and isinstance(e, reraise_if):
+                    raise
+                
+                handle_service_error(operation, e, context, raise_as)
+        
+        # Return appropriate wrapper based on function type
+        if asyncio.iscoroutinefunction(func):
+            return async_wrapper
+        else:
+            return sync_wrapper
+    
+    return decorator
+
+
+def handle_api_error(
+    operation: str,
+    error: Exception,
+    status_code: int = status.HTTP_500_INTERNAL_SERVER_ERROR,
+    context: Optional[Dict[str, Any]] = None
+) -> HTTPException:
+    """
+    Consolidated API error handling pattern.
+    Replaces repeated HTTPException raising patterns.
+    
+    Args:
+        operation: Description of operation that failed
+        error: The original exception  
+        status_code: HTTP status code to return
+        context: Additional context for logging
+        
+    Returns:
+        HTTPException to raise
+    """
+    error_context = context or {}
+    error_context.update({
+        "operation": operation,
+        "error": str(error),
+        "error_type": type(error).__name__
+    })
+    
+    logger.error(f"api_{operation}_failed", **error_context, exc_info=True)
+    
+    return HTTPException(
+        status_code=status_code,
+        detail=f"Failed to {operation}: {str(error)}"
+    )
+
+
+def with_api_error_handling(
+    operation: str,
+    status_code: int = status.HTTP_500_INTERNAL_SERVER_ERROR,
+    context: Optional[Dict[str, Any]] = None
+):
+    """
+    Decorator to add consistent API error handling to endpoint functions.
+    
+    Args:
+        operation: Description of operation for error messages
+        status_code: HTTP status code to return on error
+        context: Additional context for logging
+    """
+    def decorator(func: F) -> F:
+        @wraps(func)
+        async def async_wrapper(*args, **kwargs):
+            try:
+                return await func(*args, **kwargs)
+            except HTTPException:
+                # Re-raise HTTPExceptions without modification
+                raise
+            except BaseAppException as e:
+                # Convert app exceptions to HTTP exceptions
+                raise HTTPException(
+                    status_code=e.status_code,
+                    detail=e.message
+                )
+            except Exception as e:
+                # Handle unexpected errors
+                raise handle_api_error(operation, e, status_code, context)
+        
+        @wraps(func)
+        def sync_wrapper(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except HTTPException:
+                # Re-raise HTTPExceptions without modification
+                raise
+            except BaseAppException as e:
+                # Convert app exceptions to HTTP exceptions
+                raise HTTPException(
+                    status_code=e.status_code,
+                    detail=e.message
+                )
+            except Exception as e:
+                # Handle unexpected errors
+                raise handle_api_error(operation, e, status_code, context)
+        
+        # Return appropriate wrapper based on function type
+        if asyncio.iscoroutinefunction(func):
+            return async_wrapper
+        else:
+            return sync_wrapper
+    
+    return decorator

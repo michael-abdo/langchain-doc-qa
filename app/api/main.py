@@ -208,9 +208,10 @@ async def root():
 
 
 # Import and include routers
-from app.api.routes import health, documents
+from app.api.routes import health, documents, metrics
 app.include_router(health.router, prefix=settings.API_PREFIX, tags=["health"])
 app.include_router(documents.router, prefix=settings.API_PREFIX, tags=["documents"])
+app.include_router(metrics.router, prefix=settings.API_PREFIX, tags=["metrics"])
 # from app.api.routes import query
 # app.include_router(query.router, prefix=settings.API_PREFIX, tags=["query"])
 

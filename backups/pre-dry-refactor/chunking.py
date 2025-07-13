@@ -1,29 +1,17 @@
 """
 Document chunking service.
 Handles intelligent splitting of documents into chunks for vector storage.
-
-REFACTORING HISTORY:
-- Converted to inherit from BaseService (DRY consolidation)
-- Unified configuration access via config accessor
-- Standardized logging patterns via @with_service_logging
-- Consolidated validation logic using CommonValidators
-- Estimated code reduction: 30% fewer lines, 50% less duplication
 """
-# DRY CONSOLIDATION: Using consolidated imports
-from app.core.common import (
-    BaseService, with_service_logging, CommonValidators,
-    get_service_logger,
-    hashlib, List, Dict, Any, Optional, Tuple, Set,
-    dataclass
-)
-
-# Specific imports that can't be consolidated
 import re
-import statistics
+import hashlib
+from typing import List, Dict, Any, Optional, Tuple, Set
+from dataclasses import dataclass
 from abc import ABC, abstractmethod
 
-# Module logger for chunking strategy classes
-logger = get_service_logger("chunking")
+from app.core.config import settings
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -292,16 +280,12 @@ class SentenceAwareTextSplitter(ChunkerInterface):
         return chunks
 
 
-class DocumentChunkingService(BaseService):
+class DocumentChunkingService:
     """Main service for document chunking operations."""
     
     def __init__(self):
-        # DRY CONSOLIDATION: Using BaseService initialization
-        super().__init__("chunking")
-        
-        # DRY CONSOLIDATION: Using consolidated config accessor
-        self.chunk_size = self.config.processing_config["chunk_size"]
-        self.chunk_overlap = self.config.processing_config["chunk_overlap"]
+        self.chunk_size = settings.CHUNK_SIZE
+        self.chunk_overlap = settings.CHUNK_OVERLAP
         
         # Default to recursive character splitting
         self.default_chunker = RecursiveCharacterTextSplitter(
@@ -332,11 +316,8 @@ class DocumentChunkingService(BaseService):
         Returns:
             List of document chunks
         """
-        # DRY CONSOLIDATION: Using consolidated validator
-        try:
-            CommonValidators.validate_text_extraction(text, min_length=1)
-        except Exception:
-            self.logger.warning("empty_text_provided_for_chunking")
+        if not text.strip():
+            logger.warning("empty_text_provided_for_chunking")
             return []
         
         # Choose chunker based on strategy
@@ -361,7 +342,7 @@ class DocumentChunkingService(BaseService):
             chunk.metadata["chunk_index"] = i
             chunk.metadata["total_chunks"] = len(chunks)
         
-        self.logger.info(
+        logger.info(
             "document_chunking_completed",
             text_length=len(text),
             chunks_created=len(chunks),
@@ -545,7 +526,7 @@ class DocumentChunkingService(BaseService):
             
             if chunk_hash in seen_hashes:
                 duplicate_chunks.append(chunk)
-                self.logger.debug(
+                logger.debug(
                     "duplicate_chunk_found",
                     hash=chunk_hash[:8],
                     content_preview=chunk.content[:50]
@@ -555,7 +536,7 @@ class DocumentChunkingService(BaseService):
                 unique_chunks.append(chunk)
         
         if duplicate_chunks:
-            self.logger.info(
+            logger.info(
                 "chunks_deduplicated",
                 total_chunks=len(chunks),
                 unique_chunks=len(unique_chunks),
@@ -592,7 +573,7 @@ class DocumentChunkingService(BaseService):
         ]
         
         if len(quality_chunks) < len(chunks):
-            self.logger.info(
+            logger.info(
                 "low_quality_chunks_filtered",
                 original_count=len(chunks),
                 kept_count=len(quality_chunks),

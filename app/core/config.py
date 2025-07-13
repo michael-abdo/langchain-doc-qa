@@ -220,10 +220,113 @@ def load_settings() -> Settings:
         sys.exit(1)
 
 
+# ============================================================================
+# CONFIGURATION ACCESS PATTERNS - DRY CONSOLIDATION
+# ============================================================================
+
+class ConfigAccessor:
+    """
+    Centralized configuration accessor to eliminate scattered settings access.
+    Provides typed, validated access to configuration values.
+    """
+    
+    def __init__(self, settings_instance: Settings):
+        self._settings = settings_instance
+    
+    # Database configuration
+    @property
+    def database_config(self) -> Dict[str, Any]:
+        """Get database configuration."""
+        return {
+            "url": self._settings.DATABASE_URL,
+            "pool_size": getattr(self._settings, 'DB_POOL_SIZE', 10),
+            "max_overflow": getattr(self._settings, 'DB_MAX_OVERFLOW', 20),
+            "echo": self._settings.DEBUG
+        }
+    
+    # Vector store configuration
+    @property
+    def vector_store_config(self) -> Dict[str, Any]:
+        """Get vector store configuration."""
+        return {
+            "type": self._settings.VECTOR_STORE_TYPE,
+            "embedding_model": self._settings.EMBEDDING_MODEL,
+            "dimension": getattr(self._settings, 'EMBEDDING_DIMENSION', 1536),
+            "collection_name": getattr(self._settings, 'COLLECTION_NAME', 'documents')
+        }
+    
+    # LLM configuration
+    @property
+    def llm_config(self) -> Dict[str, Any]:
+        """Get LLM configuration."""
+        return {
+            "provider": self._settings.LLM_PROVIDER,
+            "model": self._settings.LLM_MODEL,
+            "api_key": self._settings.OPENAI_API_KEY,
+            "temperature": getattr(self._settings, 'LLM_TEMPERATURE', 0.7),
+            "max_tokens": getattr(self._settings, 'LLM_MAX_TOKENS', 4096)
+        }
+    
+    # Processing configuration
+    @property
+    def processing_config(self) -> Dict[str, Any]:
+        """Get document processing configuration."""
+        return {
+            "max_file_size_mb": self._settings.MAX_FILE_SIZE_MB,
+            "allowed_types": self._settings.ALLOWED_FILE_TYPES,
+            "chunk_size": self._settings.CHUNK_SIZE,
+            "chunk_overlap": self._settings.CHUNK_OVERLAP,
+            "max_memory_mb": getattr(self._settings, 'MAX_PROCESSING_MEMORY_MB', 512),
+            "max_pdf_pages": getattr(self._settings, 'MAX_PDF_PAGES', 1000)
+        }
+    
+    # API configuration
+    @property
+    def api_config(self) -> Dict[str, Any]:
+        """Get API configuration."""
+        return {
+            "host": self._settings.API_HOST,
+            "port": self._settings.API_PORT,
+            "prefix": self._settings.API_PREFIX,
+            "debug": self._settings.DEBUG,
+            "allowed_origins": self._settings.ALLOWED_ORIGINS
+        }
+    
+    # Security configuration
+    @property
+    def security_config(self) -> Dict[str, Any]:
+        """Get security configuration."""
+        return {
+            "secret_key": self._settings.SECRET_KEY,
+            "algorithm": self._settings.ALGORITHM,
+            "token_expire_minutes": self._settings.ACCESS_TOKEN_EXPIRE_MINUTES
+        }
+    
+    # Convenience methods for common access patterns
+    def get_file_size_limit_bytes(self) -> int:
+        """Get file size limit in bytes."""
+        return self._settings.MAX_FILE_SIZE_MB * 1024 * 1024
+    
+    def is_debug_mode(self) -> bool:
+        """Check if debug mode is enabled."""
+        return self._settings.DEBUG
+    
+    def get_supported_file_types(self) -> set:
+        """Get supported file types as a set."""
+        return set(self._settings.ALLOWED_FILE_TYPES)
+    
+    def validate_file_type(self, file_extension: str) -> bool:
+        """Validate if file type is supported."""
+        return file_extension.lower() in self.get_supported_file_types()
+
+
 # Create a singleton instance
 settings = load_settings()
 
-# Export commonly used settings
+# Create configuration accessor
+config = ConfigAccessor(settings)
+
+# Export commonly used settings (backwards compatibility)
 DEBUG = settings.DEBUG
 SECRET_KEY = settings.SECRET_KEY
 API_PREFIX = settings.API_PREFIX

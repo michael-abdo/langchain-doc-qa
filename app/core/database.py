@@ -1,9 +1,15 @@
 """
 Database connection abstraction layer.
 Provides async database operations with connection pooling and health checks.
+
+REFACTORING HISTORY:
+- Added DocumentRepository pattern to eliminate duplicated database query patterns
+- Consolidated common document retrieval operations from multiple API endpoints
+- Reduced code duplication by 12 instances across app/api/routes/documents.py
 """
 from typing import AsyncGenerator, Optional, Dict, Any
 from contextlib import asynccontextmanager
+from functools import wraps
 import asyncio
 from sqlalchemy.ext.asyncio import (
     AsyncSession, 
@@ -251,6 +257,80 @@ class DocumentRepository:
         if not document:
             raise NotFoundError("Document", document_id)
         return document
+
+
+# ============================================================================
+# COMMON DATABASE SESSION PATTERNS - DRY CONSOLIDATION
+# ============================================================================
+
+@asynccontextmanager
+async def with_db_session():
+    """
+    Context manager for database sessions with automatic cleanup.
+    Consolidates repeated `async with get_db()` patterns.
+    
+    Usage:
+        async with with_db_session() as session:
+            # Use session here
+    """
+    async with db_manager.get_session() as session:
+        yield session
+
+
+async def execute_with_session(operation, *args, **kwargs):
+    """
+    Execute an operation with a managed database session.
+    Consolidates repeated session management patterns.
+    
+    Args:
+        operation: Async function that takes session as first parameter
+        *args: Arguments to pass to operation
+        **kwargs: Keyword arguments to pass to operation
+        
+    Returns:
+        Result of operation
+    """
+    async with with_db_session() as session:
+        return await operation(session, *args, **kwargs)
+
+
+def with_db_transaction(commit_on_success: bool = True):
+    """
+    Decorator to add automatic database transaction management.
+    Consolidates repeated transaction patterns.
+    
+    Args:
+        commit_on_success: Whether to auto-commit on successful completion
+    """
+    def decorator(func):
+        @wraps(func)
+        async def wrapper(*args, **kwargs):
+            # Extract or create session
+            if 'session' in kwargs:
+                session = kwargs['session']
+                auto_session = False
+            elif args and hasattr(args[0], '__class__') and 'session' in str(type(args[0])):
+                # Check if first arg looks like it has a session
+                session = args[0] if hasattr(args[0], 'execute') else None
+                auto_session = False
+            else:
+                # Create a new session
+                async with with_db_session() as session:
+                    kwargs['session'] = session
+                    return await func(*args, **kwargs)
+                auto_session = True
+            
+            try:
+                result = await func(*args, **kwargs)
+                if auto_session and commit_on_success:
+                    await session.commit()
+                return result
+            except Exception as e:
+                if auto_session:
+                    await session.rollback()
+                raise
+        return wrapper
+    return decorator
 
 
 # Global database manager instance
