@@ -153,6 +153,73 @@ class RateLimitError(BaseAppException):
         )
 
 
+class QueryValidationError(BaseAppException):
+    """Raised when query validation fails."""
+    
+    def __init__(self, message: str, errors: Optional[list] = None, warnings: Optional[list] = None):
+        details = {}
+        if errors:
+            details["errors"] = errors
+        if warnings:
+            details["warnings"] = warnings
+        
+        super().__init__(
+            message=message,
+            error_code="QUERY_VALIDATION_ERROR",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            details=details
+        )
+
+
+class SecurityError(BaseAppException):
+    """Raised when security issues are detected."""
+    
+    def __init__(self, message: str, security_flags: Optional[list] = None):
+        details = {"security_flags": security_flags} if security_flags else {}
+        super().__init__(
+            message=message,
+            error_code="SECURITY_ERROR",
+            status_code=status.HTTP_403_FORBIDDEN,
+            details=details
+        )
+
+
+class ComplexityError(BaseAppException):
+    """Raised when query complexity exceeds limits."""
+    
+    def __init__(self, message: str, complexity_score: Optional[Any] = None):
+        details = {}
+        if complexity_score:
+            details["complexity_score"] = complexity_score.score if hasattr(complexity_score, 'score') else complexity_score
+            if hasattr(complexity_score, 'factors'):
+                details["complexity_factors"] = complexity_score.factors
+        
+        super().__init__(
+            message=message,
+            error_code="COMPLEXITY_ERROR",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            details=details
+        )
+
+
+class ProcessingError(BaseAppException):
+    """Raised when general processing errors occur."""
+    
+    def __init__(self, message: str, operation: Optional[str] = None, context: Optional[Dict[str, Any]] = None):
+        details = {}
+        if operation:
+            details["operation"] = operation
+        if context:
+            details.update(context)
+        
+        super().__init__(
+            message=message,
+            error_code="PROCESSING_ERROR",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            details=details
+        )
+
+
 class AuthenticationError(BaseAppException):
     """Raised when authentication fails."""
     

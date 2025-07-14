@@ -29,7 +29,8 @@ __all__ = [
     'BaseService', 'with_service_logging', 'CommonValidators', 
     'get_service_logger', 'get_api_logger', 'create_safe_filename',
     'calculate_content_hash', 'validate_file_size', 'validate_file_type',
-    'create_error_context', 'ApiResponses'
+    'create_error_context', 'ApiResponses', 'format_file_size',
+    'truncate_text', 'ensure_directory_exists', 'normalize_text'
 ]
 
 # Third-party
@@ -143,6 +144,57 @@ def create_error_context(operation: str, **kwargs) -> Dict[str, Any]:
     return context
 
 
+def format_file_size(size_bytes: int) -> str:
+    """
+    Format file size in human-readable format.
+    Replaces duplicate implementations in multiple files.
+    """
+    for unit in ['B', 'KB', 'MB', 'GB']:
+        if size_bytes < 1024.0:
+            return f"{size_bytes:.1f} {unit}"
+        size_bytes /= 1024.0
+    return f"{size_bytes:.1f} TB"
+
+
+def truncate_text(text: str, max_length: int = 100, suffix: str = "...") -> str:
+    """
+    Truncate text to specified length with suffix.
+    Consolidates text truncation logic.
+    """
+    if len(text) <= max_length:
+        return text
+    return text[:max_length - len(suffix)] + suffix
+
+
+def ensure_directory_exists(directory_path: Union[str, Path]) -> Path:
+    """
+    Ensure directory exists, create if it doesn't.
+    Replaces duplicate directory creation patterns.
+    """
+    path = Path(directory_path)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def normalize_text(text: str, remove_extra_spaces: bool = True) -> str:
+    """
+    Normalize text by removing extra whitespace and control characters.
+    Consolidates text cleaning logic.
+    """
+    if not text:
+        return ""
+    
+    # Remove control characters except newlines and tabs
+    cleaned = ''.join(char for char in text if ord(char) >= 32 or char in '\n\t')
+    
+    if remove_extra_spaces:
+        # Replace multiple spaces with single space
+        import re
+        cleaned = re.sub(r'\s+', ' ', cleaned)
+    
+    return cleaned.strip()
+
+
 # ============================================================================
 # COMMON VALIDATION PATTERNS - DRY CONSOLIDATION
 # ============================================================================
@@ -155,13 +207,27 @@ class CommonValidators:
         """Validate document ID format."""
         if not document_id or not isinstance(document_id, str):
             raise ValidationError("Document ID must be a non-empty string")
-        return document_id.strip()
+        
+        # Additional validation for ID format
+        doc_id = document_id.strip()
+        if len(doc_id) < 3 or len(doc_id) > 255:
+            raise ValidationError("Document ID must be between 3 and 255 characters")
+        
+        # Basic format validation (alphanumeric, hyphens, underscores)
+        import re
+        if not re.match(r'^[a-zA-Z0-9_-]+$', doc_id):
+            raise ValidationError("Document ID contains invalid characters")
+        
+        return doc_id
     
     @staticmethod
     def validate_content_not_empty(content: bytes, operation: str = "processing") -> None:
         """Validate that content is not empty."""
         if not content or len(content) == 0:
             raise ValidationError(f"Empty content provided for {operation}")
+        
+        if len(content.strip()) == 0:
+            raise ValidationError(f"Content contains only whitespace for {operation}")
     
     @staticmethod
     def validate_text_extraction(text: str, min_length: int = 10) -> None:
@@ -171,6 +237,42 @@ class CommonValidators:
                 f"Extracted text too short: {len(text.strip()) if text else 0} chars "
                 f"(minimum {min_length})"
             )
+        
+        # Check for reasonable text content
+        if len(text.strip()) > 0 and len(text.strip().split()) < 2:
+            raise ValidationError("Extracted text appears to contain insufficient content")
+    
+    @staticmethod
+    def validate_chunk_data(chunks: List[Dict[str, Any]]) -> None:
+        """Validate chunk data structure."""
+        if not chunks or not isinstance(chunks, list):
+            raise ValidationError("Chunks must be a non-empty list")
+        
+        for i, chunk in enumerate(chunks):
+            if not isinstance(chunk, dict):
+                raise ValidationError(f"Chunk {i} must be a dictionary")
+            
+            required_fields = ["content", "metadata"]
+            for field in required_fields:
+                if field not in chunk:
+                    raise ValidationError(f"Chunk {i} missing required field: {field}")
+            
+            if not chunk["content"] or len(chunk["content"].strip()) < 5:
+                raise ValidationError(f"Chunk {i} content too short")
+    
+    @staticmethod
+    def validate_pagination_params(page: int, page_size: int, max_page_size: int = 100) -> Tuple[int, int]:
+        """Validate pagination parameters."""
+        if page < 1:
+            raise ValidationError("Page number must be >= 1")
+        
+        if page_size < 1:
+            raise ValidationError("Page size must be >= 1")
+        
+        if page_size > max_page_size:
+            raise ValidationError(f"Page size cannot exceed {max_page_size}")
+        
+        return page, page_size
 
 
 # ============================================================================

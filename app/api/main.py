@@ -7,9 +7,11 @@ from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.exceptions import RequestValidationError
+from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 import time
 import asyncio
+import os
 
 from app.core.config import settings
 from app.core.logging import get_logger, LoggingMiddleware, set_correlation_id, log_request_error
@@ -208,12 +210,19 @@ async def root():
 
 
 # Import and include routers
-from app.api.routes import health, documents, metrics
+from app.api.routes import health, documents, metrics, query
 app.include_router(health.router, prefix=settings.API_PREFIX, tags=["health"])
 app.include_router(documents.router, prefix=settings.API_PREFIX, tags=["documents"])
 app.include_router(metrics.router, prefix=settings.API_PREFIX, tags=["metrics"])
-# from app.api.routes import query
-# app.include_router(query.router, prefix=settings.API_PREFIX, tags=["query"])
+app.include_router(query.router, prefix=settings.API_PREFIX, tags=["query"])
+
+# Mount static files for React frontend (if build directory exists)
+static_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "frontend", "dist")
+if os.path.exists(static_dir):
+    app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
+    logger.info("static_files_mounted", directory=static_dir)
+else:
+    logger.info("static_files_not_found", expected_directory=static_dir)
 
 
 if __name__ == "__main__":
